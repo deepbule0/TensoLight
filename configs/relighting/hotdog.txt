@@ -1,0 +1,68 @@
+dataset_name = TensoLight_relighting_test
+datadir = data/syn/hotdog-diffuse_in_bedroom_v2_rotated
+hdrdir = data/Environment_Maps/exr_envmaps
+expname = hotdog
+add_timestamp = 0
+downsample_train = 1
+downsample_test = 1
+geo_buffer_path =  log/relighting_test/hotdog/
+
+n_iters = 80000
+batch_size = 256
+
+lr_decay_iters = 80000
+
+
+N_voxel_init = 2097152 # 128**3
+N_voxel_final = 27000000 # 300**3
+
+ckpt =  log/test/hotdog/hotdog.th
+upsamp_list = [20000, 25000, 30000, 35000]
+update_AlphaMask_list = [10000, 20000, 24000, 28000, 32000]
+
+
+N_vis = 3
+vis_every = 10000
+
+
+render_test = 1
+
+n_lamb_sigma = [16,16,16]
+n_lamb_sh = [48,48,48]
+model_name = TensorVMSplit
+
+
+shadingMode = MLP_Fea
+fea2denseAct = softplus
+
+view_pe = 2
+fea_pe = 2
+pos_pe = 2
+
+
+
+light_sample_train = stratified_sampling
+light_kind = tensolight
+ 
+normals_kind = derived_plus_predicted
+
+normals_diff_weight = 0.0004
+
+batch_size_test = 512
+
+light_name = sunset
+albedo_smoothness_loss_weight = 0.001
+roughness_smoothness_loss_weight = 0.001
+
+
+L1_weight_inital = 8e-5
+L1_weight_rest = 4e-5
+rm_weight_mask_thre = 1e-4
+
+TV_weight_density = 0.01
+TV_weight_app = 0.001
+
+
+
+
+ 
