@@ -17,7 +17,7 @@ pip install tqdm scikit-image opencv-python configargparse lpips imageio-ffmpeg 
 
  Please download the dataset from the following links and unzip to the project directory. 
  
-https://github.com/deepbule0/TensoLight/releases/download/release/data.zip
+[https://github.com/deepbule0/TensoLight/releases/download/release/data.zip](https://github.com/deepbule0/TensoLight/releases/download/v1.0/data.zip)
 
 
 The data.zip file contains synthetic and real-world datasets for evaluation purposes. We converted the HDR image data from the NeRF Emitter into the sRGB format through tone mapping and generated foreground masks for the real-world datasets using SAM2 (Segment Anything Model v2).
