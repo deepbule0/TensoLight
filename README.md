@@ -25,7 +25,7 @@ The data.zip file contains synthetic and real-world datasets for evaluation purp
 
 ## Training and Evaluation
 
-Simply run the following code for training and evaluatation on the synthetic and real-world datasets.
+Simply run the following code for training and evaluation on the synthetic and real-world datasets.
 
 ```bash
 bash run_all.sh
