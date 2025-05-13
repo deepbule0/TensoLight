@@ -43,7 +43,7 @@ class TensorVMSplit(TensorBase):
                         {'params': self.app_plane, 'lr': lr_init_spatialxyz},
                         {'params': self.basis_mat.parameters(), 'lr':lr_init_network},
                         {'params': self.basis_mat1.parameters(), 'lr':lr_init_network}]
-        # TODO: merge the learing rates of the following two groups into config file
+
         grad_vars += [  {'params': self.light_line.parameters(), 'lr':0.001}]
 
         if isinstance(self.renderModule, torch.nn.Module):

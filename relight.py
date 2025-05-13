@@ -23,7 +23,6 @@ from models.relight_utils import Environment_Light
 from renderer import compute_rescale_ratio, fill_ret
 
 
-
 def relight(dataset, args):
     if not os.path.exists(args.ckpt):
         print('the checkpoint path for TensoLight does not exists!!!')
@@ -45,15 +44,12 @@ def relight(dataset, args):
     roughness_list = []
 
     envir_light = Environment_Light(args.hdrdir)
-
-    #### 
     light_rotation_idx = 0
-    ####
-    is_real = 'real' in args.expname
-    if is_real:
-        rescale_value = 2*torch.ones((3,3), device=device)
-    else:    
+
+    if 'real' not in args.expname:
         rescale_value = compute_rescale_ratio(TensoLight, envir_light, dataset, args)
+    else:
+        rescale_value = 2*torch.ones((3,3), device=device)
     
 
     relight_psnr = dict()
@@ -66,7 +62,6 @@ def relight(dataset, args):
 
 
     for idx in tqdm(range(len(dataset))):
-        # rescale_value = 1#
         relight_pred_img_with_bg, relight_pred_img_without_bg, relight_gt_img = dict(), dict(), dict()
         for cur_light_name in dataset.light_names:
             relight_pred_img_with_bg[f'{cur_light_name}'] = []
@@ -75,24 +70,29 @@ def relight(dataset, args):
 
         cur_dir_path = os.path.join(args.geo_buffer_path, f'{dataset.split}_{idx:0>3d}')
         os.makedirs(cur_dir_path, exist_ok=True)
-        item = dataset[idx]
-        rays_ = item['rays'].squeeze(0).to(device) # [H*W, 6]
-        light_idx_ = item['light_idx'].to(torch.int32)
-        gt_mask = item['rgbs_mask'].squeeze(0).squeeze(-1).cpu() # [H*W]
-        gt_mask = gt_mask > 0.5
-        masks = gt_mask.view(H, W)
-        if is_real:
-            rotation_matrix = torch.index_select(TensoLight.camera_rotation_matrix, 0, light_idx_.squeeze()).to(device) # [bs, 3, 3]
-            rays_ = rotation_ray(rotation_matrix, rays_)
-            gt_rgb = item['rgbs'].squeeze(0).view(1, H*W, 3).expand(len(light_name_list), H*W, 3).cpu()  # [N, H, W, 3]
-            light_idx = light_idx_[gt_mask, :].to(device)
-        else:
+        if 'real' not in args.expname:
+            item = dataset[idx]
+            rays_ = item['rays'].squeeze(0).to(device) # [H*W, 6]
+            gt_mask = item['rgbs_mask'].squeeze(0).squeeze(-1).cpu() # [H*W]
+            gt_mask = gt_mask > 0.5
+            masks = gt_mask.view(H, W)
+            frame_rays = rays_[gt_mask, :]
             gt_rgb = item['rgbs'].squeeze(0).view(len(light_name_list), -1, 3).cpu()  # [N, H, W, 3]
             light_idx = torch.zeros((frame_rays.shape[0], 1), dtype=torch.int).to(device).fill_(light_rotation_idx)
-            
-        frame_rays = rays_[gt_mask, :]
-        
-        rgb_map, depth_map, normal_map, albedo_map, roughness_map = [], [], [], [], []
+        else:
+            item = dataset[idx]
+            rays_ = item['rays'].squeeze(0).to(device) # [H*W, 6]
+            light_idx_ = item['light_idx'].to(torch.int32)
+            rotation_matrix = torch.index_select(TensoLight.camera_rotation_matrix, 0, light_idx_.squeeze()) # [bs, 3, 3]
+            rays_ = rotation_ray(rotation_matrix, rays_)
+            gt_mask = item['rgbs_mask'].squeeze(0).squeeze(-1).cpu() # [H*W]
+            gt_mask = gt_mask > 0.5
+            masks = gt_mask.view(H, W)
+            frame_rays = rays_[gt_mask, :]
+            gt_rgb = item['rgbs'].squeeze(0).view(1, H*W, 3).expand(len(light_name_list), H*W, 3).cpu()  # [N, H, W, 3]
+            light_idx = light_idx_[gt_mask, :].to(device)
+
+        rgb_map, depth_map, normal_map, albedo_map, roughness_map, fresnel_map, normals_diff_map, normals_orientation_loss_map = [], [], [], [], [], [], [], []
         acc_map = []
 
         chunk_idxs = torch.split(torch.arange(frame_rays.shape[0]), args.batch_size) # choose the first light idx
@@ -104,7 +104,6 @@ def relight(dataset, args):
 
 
             relight_rgb_chunk = torch.ones_like(rgb_chunk)
-            # gt_albedo_chunk = gt_albedo[chunk_idx] # use GT to debug
             acc_chunk_mask = (acc_chunk > args.acc_mask_threshold)
             rays_o_chunk, rays_d_chunk = frame_rays[chunk_idx][:, :3], frame_rays[chunk_idx][:, 3:]
             surface_xyz_chunk = rays_o_chunk + depth_chunk.unsqueeze(-1) * rays_d_chunk  # [bs, 3]
@@ -118,8 +117,6 @@ def relight(dataset, args):
 
             ## Get incident light directions
             for idx_, cur_light_name in enumerate(dataset.light_names):
-                # if os.path.exists(os.path.join(cur_dir_path, 'relighting', f'{cur_light_name}.png')):
-                #     continue
                 relight_rgb_chunk.fill_(1.0)
                 masked_light_dir, masked_light_rgb, masked_light_pdf = envir_light.sample_light(cur_light_name, masked_normal_chunk.shape[0], 2048) # [bs, envW * envH, 3]
                 surf2l = masked_light_dir                   # [surface_point_num, envW * envH, 3]
@@ -135,7 +132,6 @@ def relight(dataset, args):
 
                 cosine_masked_surface_pts = masked_surface_xyz[cosine_mask] # [num_of_vis_to_get, 3]
                 cosine_masked_surf2l = surf2l[cosine_mask] # [num_of_vis_to_get, 3]
-
                 indirect_light = torch.zeros((*cosine_mask.shape, 3), device=device)   # [bs, envW * envH, 3]
                 masked_light_idx_ = masked_light_idx_chunk.reshape(-1, 1, 1).expand((*cosine_mask.shape, 1))
                 visibility[cosine_mask], \
@@ -262,6 +258,7 @@ def relight(dataset, args):
 
         if args.if_save_albedo:
             albedo_map = albedo_map.reshape(H, W, 3)
+
             
             albedo_map_to_save = (albedo_map * 255).numpy().astype('uint8')
             albedo_map_to_save = np.concatenate([albedo_map_to_save, acc_map], axis=2).astype('uint8')
@@ -299,6 +296,7 @@ def relight(dataset, args):
             m2.append(relight_ssim[cur_light_name])
             m3.append(relight_l_alex[cur_light_name])
         f.write(f'all:  PSNR {np.mean(m1)}; SSIM {np.mean(m2)}; L_Alex {np.mean(m3)}\n')
+
 
 
 if __name__ == "__main__":

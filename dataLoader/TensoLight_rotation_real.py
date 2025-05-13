@@ -81,7 +81,7 @@ class TensoLight_Dataset_rotated_lights_real(Dataset):
         self.white_bg = True
         self.downsample = downsample
         self.transform = self.define_transforms()
-        self.near_far = [0.05, 100]  
+        self.near_far = [0.05,  10]  
         self.meta_path = os.path.join(self.root_dir, 'transforms.json')
         with open(self.meta_path, 'r') as f:
             self.meta = json.load(f)

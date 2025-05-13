@@ -63,6 +63,7 @@ def config_parser(cmd=None):
     
     # model
     # volume options
+    parser.add_argument("--normals_orientation_weight", type=float, default=0.001, help="weight for normals orientation loss, introduced in ref-nerf as Ro loss")
     parser.add_argument("--n_lamb_sigma", type=int, action="append")
     parser.add_argument("--n_lamb_sh", type=int, action="append")
     parser.add_argument("--data_dim_color", type=int, default=27)

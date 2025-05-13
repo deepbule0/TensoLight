@@ -11,13 +11,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 from models.relight_utils import *
 brdf_specular = GGX_specular
 
-
 def compute_rescale_ratio(TensoLight, envir_light, dataset, args, sampled_num=20, batch_size=2048):
     W, H = dataset.img_wh
     light_name_list= dataset.light_names
     #### 
     light_rotation_idx = 0
-    log_scale = torch.nn.Parameter(torch.zeros(3, 3, device=device))  # 初始化为0，对应rescale_value=1
+    log_scale = torch.nn.Parameter(torch.zeros(3, 3, device=device))  
     
     optimizer = torch.optim.Adam([log_scale], lr=0.005)
     for idx in tqdm(range(sampled_num)):
@@ -28,15 +27,13 @@ def compute_rescale_ratio(TensoLight, envir_light, dataset, args, sampled_num=20
 
         item = dataset[idx]
         frame_rays = item['rays'].squeeze(0).to(device) # [H*W, 6]
-
         gt_mask = item['rgbs_mask'].squeeze(0).squeeze(-1).to(device) # [H*W]
-     
         gt_rgb = item['rgbs'].squeeze(0).view(len(light_name_list), H*W, 3).to(device) # [N, H, W, 3]
         gt_mask = gt_mask > 0
-
         light_idx = torch.zeros((frame_rays.shape[0], 1), dtype=torch.int).to(device).fill_(light_rotation_idx)
         frame_rays = frame_rays[gt_mask, :]
         gt_rgb = gt_rgb[:, gt_mask, :]
+
 
         chunk_idxs = torch.split(torch.arange(frame_rays.shape[0]), batch_size) # choose the first light idx
         for chunk_idx in chunk_idxs:
@@ -47,7 +44,6 @@ def compute_rescale_ratio(TensoLight, envir_light, dataset, args, sampled_num=20
 
 
             gt_rgb_chunk = gt_rgb[:, chunk_idx]
-            # gt_albedo_chunk = gt_albedo[chunk_idx] # use GT to debug
             acc_chunk_mask = (acc_chunk > args.acc_mask_threshold)
             rays_o_chunk, rays_d_chunk = frame_rays[chunk_idx][:, :3], frame_rays[chunk_idx][:, 3:]
             surface_xyz_chunk = rays_o_chunk + depth_chunk.unsqueeze(-1) * rays_d_chunk  # [bs, 3]
@@ -60,7 +56,7 @@ def compute_rescale_ratio(TensoLight, envir_light, dataset, args, sampled_num=20
             masked_light_idx_chunk = light_idx[chunk_idx][acc_chunk_mask] # [surface_point_num, 1]
 
             for idx_, cur_light_name in enumerate(dataset.light_names):
-                masked_light_dir, masked_light_rgb, masked_light_pdf = envir_light.sample_light(cur_light_name, masked_normal_chunk.shape[0], 4096) # [bs, envW * envH, 3]
+                masked_light_dir, masked_light_rgb, masked_light_pdf = envir_light.sample_light(cur_light_name, masked_normal_chunk.shape[0], 1024) # [bs, envW * envH, 3]
                 surf2l = masked_light_dir                   # [surface_point_num, envW * envH, 3]
                 surf2c = -rays_d_chunk[acc_chunk_mask]      # [surface_point_num, 3]
                 surf2c = safe_l2_normalize(surf2c, dim=-1)  # [surface_point_num, 3]
@@ -92,14 +88,14 @@ def compute_rescale_ratio(TensoLight, envir_light, dataset, args, sampled_num=20
 
                 ## Get BRDF specs
                 nlights = surf2l.shape[1]
-                
-                # relighting
                 rescale_value = torch.exp(log_scale)
+                # relighting
                 specular_relighting = brdf_specular(masked_normal_chunk, surf2c, surf2l, masked_roughness_chunk, masked_fresnel_chunk)  # [surface_point_num, envW * envH, 3]
                 masked_albedo_chunk_rescaled = (masked_albedo_chunk * rescale_value[idx_, :])
                 surface_brdf_relighting = masked_albedo_chunk_rescaled.unsqueeze(1).expand(-1, nlights, -1) / np.pi + specular_relighting # [surface_point_num, envW * envH, 3]
+               
                 direct_light = masked_light_rgb 
-                light_rgbs = visibility * direct_light 
+                light_rgbs = visibility * direct_light
                 light_pix_contrib = surface_brdf_relighting * light_rgbs * cosine[:, :, None] / masked_light_pdf
                 surface_relight_rgb_chunk  = torch.mean(light_pix_contrib, dim=1)  # [bs, 3]
 
@@ -108,12 +104,14 @@ def compute_rescale_ratio(TensoLight, envir_light, dataset, args, sampled_num=20
                     surface_relight_rgb_chunk = linear2srgb_torch(surface_relight_rgb_chunk)
 
                 loss = torch.mean((surface_relight_rgb_chunk - gt_rgb_chunk[idx_, acc_chunk_mask]) ** 2)
+
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+                # print(f'loss: {loss.detach().cpu()}')
 
     rescale_value = torch.exp(log_scale)
-    print(rescale_value)
+    print(rescale_value.detach())
     return rescale_value
 
 
@@ -140,7 +138,7 @@ def Renderer_TensoLight_train(
     light_idx = light_idx.to(device, torch.int32)
     if not train_light:
         rgb_map, depth_map, normal_map, albedo_map, roughness_map, \
-            fresnel_map, acc_map, normals_diff_map, \
+            fresnel_map, acc_map, normals_diff_map, normals_orientation_loss_map, \
             acc_mask, albedo_smoothness_loss, roughness_smoothness_loss \
             = TensoLight(rays, light_idx, is_train=is_train, white_bg=white_bg, is_relight=is_relight, ndc_ray=ndc_ray, N_samples=N_samples)
 
@@ -191,6 +189,7 @@ def Renderer_TensoLight_train(
             "fresnel_map": fresnel_map,
             'rgb_with_brdf_map': rgb_with_brdf,
             'normals_diff_map': normals_diff_map,
+            'normals_orientation_loss_map': normals_orientation_loss_map,
             'albedo_smoothness_loss': albedo_smoothness_loss,
             'roughness_smoothness_loss': roughness_smoothness_loss,
         }
@@ -412,13 +411,7 @@ def evaluation_iter_TensoLight(
         fresnel_map = (fresnel_map.numpy() * 255).astype('uint8')
         acc_map = (acc_map.numpy() * 255).astype('uint8')
 
-        # Visualize normal
-        ## Prediction
         normal_map = F.normalize(normal_map, dim=-1)
-        
-
-
-
         normal_raw_list.append(normal_map)
 
         normal_rgb_map = normal_map * 0.5 + 0.5 # map from [-1, 1] to [0, 1] to visualize
@@ -508,13 +501,13 @@ def evaluation_iter_TensoLight(
 
 
             saved_message = f'Iteration:{prtx[:-1]}: \n' \
-                            + f'\tPSNR_nvs: {psnr:.2f}, PSNR_nvs_brdf: {psnr_rgb_brdf:.2f}' \
+                            + f'\tPSNR_nvs: {psnr:.4f}, PSNR_nvs_brdf: {psnr_rgb_brdf:.4f}' \
                             + f'\tSSIM_rgb: {ssim:.4f}, L_Alex_rgb: {l_a:.4f}, L_VGG_rgb: {l_v:.4f}\n' \
                             + f'\tSSIM_rgb_brdf: {ssim_rgb_brdf:.4f}, L_Alex_rgb_brdf: {l_a_rgb_brdf:.4f}, L_VGG_rgb_brdf: {l_v_rgb_brdf:.4f}\n' \
                         
 
         else:
-            saved_message = f'Iteration:{prtx[:-1]}, PSNR_nvs: {psnr:.2f}, PSNR_nvs_brdf: {psnr_rgb_brdf:.2f}\n'
+            saved_message = f'Iteration:{prtx[:-1]}, PSNR_nvs: {psnr:.4f}, PSNR_nvs_brdf: {psnr_rgb_brdf:.4f}\n'
 
         with open(f'{savePath}/metrics_record.txt', 'a') as f:
             f.write(saved_message)

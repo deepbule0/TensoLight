@@ -1,5 +1,5 @@
 dataset_name = TensoLight_relighting_test
-datadir = data/syn/head_in_staircase_v2_rotated
+datadir = data/syn/relight_evaluate/head
 hdrdir = data/Environment_Maps/exr_envmaps
 expname = head
 

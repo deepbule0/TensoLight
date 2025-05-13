@@ -1,5 +1,5 @@
 dataset_name = TensoLight_relighting_test
-datadir = data/syn/hotdog-diffuse_in_bedroom_v2_rotated
+datadir = data/syn/relight_evaluate/hotdog
 hdrdir = data/Environment_Maps/exr_envmaps
 expname = hotdog
 add_timestamp = 0

@@ -18,14 +18,9 @@ mi.set_variant('scalar_rgb')
 class TensoLight_Relighting_test(Dataset):
     def __init__(self,
                  root_dir,
-                 hdr_dir=None,
                  split='train',
-                 random_test=True,
                  N_vis=-1,
                  downsample=1.0,
-                 sub=0,
-                 light_rotation=['000', '045', '090', '135', '180', '225', '270', '315'],
-                 light_names=["sunrise"]
                  ):
         """
         @param root_dir: str | Root path of dataset folder
@@ -50,13 +45,12 @@ class TensoLight_Relighting_test(Dataset):
         self.split = split
 
         self.len = 20
-        self.near_far = [0.05, 100]  
+        self.near_far = [0.05, 10]  
         self.scene_scale = 1.
         self.scene_bbox = torch.tensor([[-self.scene_scale, -self.scene_scale, -self.scene_scale], [self.scene_scale, self.scene_scale, self.scene_scale]]) * self.downsample
         self.center = torch.mean(self.scene_bbox, axis=0).float().view(1, 1, 3)
         self.radius = (self.scene_bbox[1] - self.center).float().view(1, 1, 3)
         self.blender2opencv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
-        # HDR configs
         self.scan = self.root_dir.stem 
 
         self.light_rotation = [0]
@@ -73,7 +67,6 @@ class TensoLight_Relighting_test(Dataset):
         self.directions = self.directions / torch.norm(self.directions, dim=-1, keepdim=True)
         self.directions = self.directions.to(torch.float)
         self.use_hdr = False
-        
     def define_transforms(self):
         transforms = T.Compose([
             T.ToTensor(),
@@ -105,8 +98,6 @@ class TensoLight_Relighting_test(Dataset):
         for root in self.env_root:
             # Read RGB data
             relight_img_path = os.path.join(root, meta['file_path'].replace('.exr', '.png'))
-            # relight_img = np.asarray(mi.Bitmap(str(relight_img_path)))
-            # relight_img[~np.isfinite(relight_img)] = 0
 
             relight_img = np.array(Image.open(relight_img_path))
             mask_path = os.path.join(root, meta['mask_path'])
@@ -117,16 +108,11 @@ class TensoLight_Relighting_test(Dataset):
                 relight_img = np.resize(relight_img, self.img_wh)
                 mask = np.resize(mask, self.img_wh)
                 
-            save_img = relight_img * 255
-            # save_img = save_img * (mask[..., None] >= 127.5) + np.ones_like(save_img) * 255 * (mask[..., None] < 127.5)
-            save_img = save_img.astype(np.uint8)
-            save_img = cv2.cvtColor(save_img, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(relight_img_path.replace('.exr', '.png'), save_img)
+            
             relight_img = self.transform(relight_img)  # [4, H, W]
             relight_rgbs = relight_img.view(3, -1).permute(1, 0)  # [H*W, 3]
             mask = self.transform(mask)  # [4, H, W]
             mask = mask.view(-1).unsqueeze(-1)
-            # relight_rgbs = relight_img[:, :3] 
             light_idx = torch.tensor(0, dtype=torch.int).repeat((self.img_wh[0] * self.img_wh[1], 1)) # [H*W, 1]
 
             relight_rgbs_list.append(relight_rgbs)
@@ -135,7 +121,6 @@ class TensoLight_Relighting_test(Dataset):
         
         relight_rgbs = torch.stack(relight_rgbs_list, dim=0)    # [rotation_num, H*W, 3]
         light_idx = torch.stack(light_idx_list, dim=0)          # [rotation_num, H*W, 1]
-        ## Obtain background mask, bg = False
 
     
 
@@ -149,3 +134,5 @@ class TensoLight_Relighting_test(Dataset):
             'w2c': w2c  # [4, 4]
         }
         return item
+
+

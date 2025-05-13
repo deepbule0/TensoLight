@@ -18,7 +18,6 @@ lr_decay_iters = 100000
 N_voxel_init = 2097152 # 128**3
 N_voxel_final = 27000000 # 300**3
 
-
 upsamp_list = [20000, 30000, 40000, 50000]
 update_AlphaMask_list = [10000, 20000, 25000, 30000, 35000, 40000, 45000]
 
@@ -47,12 +46,13 @@ light_kind = tensolight
  
 normals_kind = derived_plus_predicted
 
-normals_diff_weight = 0.0004
+normals_diff_weight = 0.001
+normals_orientation_weight = 0.005
 
 batch_size_test = 512
 
 albedo_smoothness_loss_weight = 0.001
-roughness_smoothness_loss_weight = 0.001
+roughness_smoothness_loss_weight = 0.01
 
 
 L1_weight_inital = 8e-5

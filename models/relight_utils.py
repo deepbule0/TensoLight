@@ -1,4 +1,5 @@
 
+from ast import arg
 import numpy as np
 import cv2
 from loguru import logger
@@ -482,7 +483,10 @@ def render_with_BRDF(
                                                                         chunk_size,
                                                                         device
                                                                         ) 
-    light_rgbs = tensolight_rgbs * visibility_compute + indirect_light
+    if 'real' in args.expname:
+        light_rgbs = tensolight_rgbs * visibility_compute
+    else:    
+        light_rgbs = tensolight_rgbs * visibility_compute + indirect_light
 
     light_pix_contrib = surface_brdf * light_rgbs * cosine[:, :, None] * light_area_weight[None,:, None]   # [bs, envW * envH, 3]
     rgb_with_brdf = torch.sum(light_pix_contrib, dim=1)  # [bs, 3]

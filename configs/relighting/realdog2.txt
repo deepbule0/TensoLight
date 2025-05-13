@@ -7,7 +7,7 @@ basedir =  log/realdog2
 add_timestamp = 0
 downsample_train = 1
 downsample_test = 1
-geo_buffer_path =  log/log_relighting_test/realdog2
+geo_buffer_path =  log/relighting_test/realdog2
 
 n_iters = 80000
 batch_size = 256

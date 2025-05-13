@@ -69,7 +69,7 @@ class TensoLight_Dataset_colmap(Dataset):
         self.white_bg = False
         self.downsample = downsample
         self.transform = self.define_transforms()
-        self.near_far = [0.05, 100]  
+        self.near_far = [0.05,  10]  
         self.scene_scale = 1.         
         if obj == '1':
             self.scene_bbox = torch.tensor([[-0.9, -1.2, 0.1],[0.5,  0.5,  1.5]])
@@ -231,11 +231,6 @@ class TensoLight_Dataset_colmap(Dataset):
             mask = resize(mask, (self.img_wh[1], self.img_wh[0]))
 
 
-        save_img = relight_img * 255
-        # save_img = save_img * (mask[..., None] < 127.5)
-        save_img = save_img.astype(np.uint8)
-        save_img = cv2.cvtColor(save_img, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(relight_img_path.replace('.jpg', '.png').replace('undistort', '0'), save_img)
         relight_img = self.transform(relight_img)  # [4, H, W]
         relight_rgbs = relight_img.view(3, -1).permute(1, 0)  # [H*W, 3]
         mask = self.transform(mask)  # [4, H, W]

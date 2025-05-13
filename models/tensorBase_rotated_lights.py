@@ -51,7 +51,7 @@ class AlphaGridMask(torch.nn.Module):
 
 
 class MLPRender_Fea(torch.nn.Module):
-    def __init__(self, inChanel, viewpe=6, feape=6, featureC=128):
+    def __init__(self, inChanel, viewpe=6, feape=6, featureC=128, act=nn.Sigmoid()):
         super(MLPRender_Fea, self).__init__()
 
         self.in_mlpC = 2 * viewpe * 3 + 2 * feape * inChanel + 3 + inChanel
@@ -63,6 +63,7 @@ class MLPRender_Fea(torch.nn.Module):
 
         self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
+        self.act_net = act
 
     def forward(self, pts, viewdirs, features):
         indata = [features, viewdirs]
@@ -72,7 +73,7 @@ class MLPRender_Fea(torch.nn.Module):
             indata += [positional_encoding(viewdirs, self.viewpe)]
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
+        rgb = self.act_net(rgb)
 
         return rgb
 
@@ -137,7 +138,7 @@ class MLPNormal_normal_and_PExyz(torch.nn.Module):
 
 
 class SafeExp(nn.Module):
-    def __init__(self, bias=-3, exp_max=8):
+    def __init__(self, bias=-3, exp_max=7.5):
         super().__init__()
         self.bias = bias
         self.exp_max = exp_max
@@ -161,7 +162,7 @@ class MLPRender_PE(torch.nn.Module):
         self.act_net = SafeExp()
 
     def forward(self, pts, viewdirs, features):
-        indata = [features, viewdirs, pts]
+        indata = [features, pts, viewdirs]
         if self.pospe > 0:
             indata += [positional_encoding(pts, self.pospe)]
         if self.viewpe > 0:
@@ -182,7 +183,7 @@ class TensorBase(torch.nn.Module):
                  shadingMode='MLP_Fea',  
                  alphaMask=None, 
                  alphaMask_light=None, 
-                 near_far=[0.05, 100.0],
+                 near_far=[0.05,  10.0],
                  density_shift=-10, 
                  alphaMask_thres=0.001, 
                  distance_scale=25, 
@@ -199,6 +200,7 @@ class TensorBase(torch.nn.Module):
                  light_kind='tensolight',
                  dataset= None,
                  fixed_fresnel= 0.04,
+                 expname='teapot',
                  **kwargs
                  ):
         super(TensorBase, self).__init__()
@@ -268,9 +270,12 @@ class TensorBase(torch.nn.Module):
         self.scale_light = 0.1
         self.AABB = AABB
         self.alphaMask_light = alphaMask_light
-        self.step_ratio_light = self.step_ratio * 4
+        self.step_ratio_light = self.step_ratio * 2
+        
+        self.expname = expname
+
         self.alphaMask_thres_light = 0.0001
-        self.rayMarch_weight_thres_light = rayMarch_weight_thres
+        self.rayMarch_weight_thres_light = 0.0001
         
         self.init_svd_volume(gridSize[0], device)
         self.init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, device)
@@ -380,6 +385,7 @@ class TensorBase(torch.nn.Module):
             'light_num': self.light_num,
             'light_kind':self.light_kind,
             'light_rotation':self.light_rotation,
+            'expname':self.expname,
         }
 
     def save(self, path):
@@ -390,6 +396,12 @@ class TensorBase(torch.nn.Module):
             ckpt.update({'alphaMask.shape': alpha_volume.shape})
             ckpt.update({'alphaMask.mask': np.packbits(alpha_volume.reshape(-1))})
             ckpt.update({'alphaMask.aabb': self.alphaMask.aabb.cpu()})
+            
+        if self.alphaMask_light is not None:
+            alpha_volume = self.alphaMask_light.alpha_volume.bool().cpu().numpy()
+            ckpt.update({'alphaMask_light.shape': alpha_volume.shape})
+            ckpt.update({'alphaMask_light.mask': np.packbits(alpha_volume.reshape(-1))})
+            ckpt.update({'alphaMask_light.aabb': self.alphaMask_light.aabb.cpu()})
         torch.save(ckpt, path)
 
     def load(self, ckpt):
@@ -398,6 +410,13 @@ class TensorBase(torch.nn.Module):
             alpha_volume = torch.from_numpy(
                 np.unpackbits(ckpt['alphaMask.mask'])[:length].reshape(ckpt['alphaMask.shape']))
             self.alphaMask = AlphaGridMask(self.device, ckpt['alphaMask.aabb'].to(self.device),
+                                           alpha_volume.float().to(self.device))
+            
+        if 'alphaMask_light.aabb' in ckpt.keys():
+            length = np.prod(ckpt['alphaMask_light.shape'])
+            alpha_volume = torch.from_numpy(
+                np.unpackbits(ckpt['alphaMask_light.mask'])[:length].reshape(ckpt['alphaMask_light.shape']))
+            self.alphaMask_light = AlphaGridMask(self.device, ckpt['alphaMask_light.aabb'].to(self.device),
                                            alpha_volume.float().to(self.device))
         self.load_state_dict(ckpt['state_dict'])
         
@@ -514,13 +533,13 @@ class TensorBase(torch.nn.Module):
         rays_pts = rays_o[..., None, :] + rays_d[..., None, :] * interpx[..., None]
         mask_outbbox = ((self.aabb[0] > rays_pts) | (rays_pts > self.aabb[1])).any(dim=-1)
         mask = mask_outbbox & (~((self.AABB[0] > rays_pts) | (rays_pts > self.AABB[1])).any(dim=-1))
-
+ 
 
         return rays_pts, interpx, mask
     
     def update_light_stepSize(self, gridSize):
-        print("aabb", self.AABB.view(-1))
-        print("grid size", gridSize)
+        print("AABB", self.AABB.view(-1))
+        print("light grid size", gridSize)
         self.AABBSize = self.AABB[1] - self.AABB[0]
         self.invAABBSize = 2.0 / self.AABBSize
         self.gridSize_light = torch.LongTensor(gridSize).to(self.device)
@@ -814,6 +833,7 @@ class TensorBase(torch.nn.Module):
         roughness_smoothness_cost = torch.zeros((*xyz_sampled.shape[:-1], 1), device=xyz_sampled.device)
 
         normals_diff = torch.zeros((*xyz_sampled.shape[:2], 1), device=xyz_sampled.device)
+        normals_orientation_loss = torch.zeros((*xyz_sampled.shape[:2], 1), device=xyz_sampled.device)
 
         if ray_valid.any():
             xyz_sampled = self.normalize_coord(xyz_sampled)
@@ -833,25 +853,44 @@ class TensorBase(torch.nn.Module):
             if is_relight: 
                 # BRDF
                 valid_brdf = self.renderModule_brdf(xyz_sampled[app_mask], intrinsic_feat)
-                valid_albedo, valid_roughness = valid_brdf[..., :3], (valid_brdf[..., 3:4] * 0.9 + 0.09)
+                valid_albedo, valid_roughness = valid_brdf[..., :3], (valid_brdf[..., 3:4] * 0.91 + 0.09)
                 albedo[app_mask] = valid_albedo         # [..., 3]
                 roughness[app_mask] = valid_roughness   # [..., 1]
                 
                 xyz_sampled_jittor = xyz_sampled[app_mask] + torch.randn_like(xyz_sampled[app_mask]) * 0.01
                 intrinsic_feat_jittor = self.compute_intrinfeature(xyz_sampled_jittor)
                 valid_brdf_jittor = self.renderModule_brdf(xyz_sampled_jittor, intrinsic_feat_jittor)
-                valid_albedo_jittor, valid_roughness_jittor = valid_brdf_jittor[..., :3], (valid_brdf_jittor[..., 3:4] * 0.9 + 0.09)
+                valid_albedo_jittor, valid_roughness_jittor = valid_brdf_jittor[..., :3], (valid_brdf_jittor[..., 3:4] * 0.91 + 0.09)
 
                 albedo_smoothness_cost[app_mask] = self.compute_relative_smoothness_loss(valid_albedo, valid_albedo_jittor)  # [..., 1]
                 roughness_smoothness_cost[app_mask] = self.compute_relative_smoothness_loss(valid_roughness, valid_roughness_jittor)  # [..., 1]
 
-                # use the predicted normals and penalize the difference between the predicted normals and derived normas at the same time
-                derived_normals = self.compute_derived_normals(xyz_sampled[app_mask])
-                predicted_normals = self.renderModule_normal(xyz_sampled[app_mask], intrinsic_feat)
-                valid_normals = predicted_normals
+                # Normal
+                if self.normals_kind == "purely_predicted":
+                    valid_normals = self.renderModule_normal(xyz_sampled[app_mask], intrinsic_feat) 
+                
+                elif self.normals_kind == "purely_derived":
+                    valid_normals = self.compute_derived_normals(xyz_sampled[app_mask])
+                elif self.normals_kind == "gt_normals":
+                    valid_normals = torch.zeros_like(xyz_sampled[app_mask]) # useless
+                elif self.normals_kind == "derived_plus_predicted": 
+                    # use the predicted normals and penalize the difference between the predicted normals and derived normas at the same time
+                    derived_normals = self.compute_derived_normals(xyz_sampled[app_mask])
+                    predicted_normals = self.renderModule_normal(xyz_sampled[app_mask], intrinsic_feat)
+                    valid_normals = predicted_normals
 
-                normals_diff[app_mask] = torch.sum(torch.pow(predicted_normals - derived_normals, 2), dim=-1, keepdim=True)
-                               
+                    normals_diff[app_mask] = torch.sum(torch.pow(predicted_normals - derived_normals, 2), dim=-1, keepdim=True)
+                    normals_orientation_loss[app_mask] = torch.sum(viewdirs[app_mask] * predicted_normals, dim=-1, keepdim=True).clamp(min=0) 
+                    
+                elif self.normals_kind == "residue_prediction":    
+                    derived_normals = self.compute_derived_normals(xyz_sampled[app_mask])
+                    predicted_normals = self.renderModule_normal(xyz_sampled[app_mask], derived_normals, intrinsic_feat)
+                    valid_normals = predicted_normals
+
+                    normals_diff[app_mask] = torch.sum(torch.pow(predicted_normals - derived_normals, 2), dim=-1, keepdim=True)
+                    normals_orientation_loss[app_mask] = torch.sum(viewdirs[app_mask] * predicted_normals, dim=-1, keepdim=True).clamp(min=0)          
+
+                
                 normal[app_mask] = valid_normals
 
         # alpha composition
@@ -866,11 +905,12 @@ class TensorBase(torch.nn.Module):
                 
             return  rgb_map, depth_map, None, \
                     None, None, None, \
-                    acc_map, None, None, \
+                    acc_map, None, None, None, \
                     None, None
         else:
             normal_map = torch.sum(weight[..., None] * normal, -2)
             normals_diff_map = torch.sum(weight[..., None] * normals_diff, -2)
+            normals_orientation_loss_map = torch.sum(weight[..., None] * normals_orientation_loss, -2) 
 
             albedo_map = torch.sum(weight[..., None] * albedo, -2)  # [..., 3]
             roughness_map = torch.sum(weight[..., None] * roughness, -2)  # [..., ]
@@ -915,5 +955,5 @@ class TensorBase(torch.nn.Module):
 
             return  rgb_map, depth_map, normal_map, \
                     albedo_map, roughness_map, fresnel_map, \
-                    acc_map, normals_diff_map, acc_mask, \
+                    acc_map, normals_diff_map, normals_orientation_loss_map, acc_mask, \
                     albedo_smoothness_loss, roughness_smoothness_loss

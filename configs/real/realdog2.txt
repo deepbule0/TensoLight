@@ -8,7 +8,7 @@ downsample_train = 1
 downsample_test = 1
 
 n_iters = 80000
-batch_size = 4096
+batch_size = 8192
 batch_size_light = 256
 
 lr_decay_iters = 80000
@@ -47,6 +47,7 @@ light_kind = tensolight
 normals_kind = derived_plus_predicted
 
 normals_diff_weight = 0.0004
+normals_orientation_weight = 0.005
 
 batch_size_test = 512
 

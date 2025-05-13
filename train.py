@@ -135,16 +135,16 @@ def reconstruction(args):
     if hasattr(train_dataset, 'AABB'):
         AABB = train_dataset.AABB.to(device)
     else:
-        AABB = aabb * 16
+        AABB = aabb * 12
     reso_cur = N_to_reso(args.N_voxel_init, aabb)  # number of voxels in each direction
-    light_grid = N_to_reso(256**3, AABB)
+    light_grid = N_to_reso(128**3, AABB)
     nSamples = min(args.nSamples, cal_n_samples(reso_cur, args.step_ratio))
 
     if args.ckpt is not None:
         ckpt = torch.load(args.ckpt, map_location=device)
         kwargs = ckpt['kwargs']
         kwargs.update({'device': device})
-        TensoLight = eval(args.model_name)(**kwargs)
+        TensoLight = eval(args.model_name)(dataset=train_dataset, **kwargs)
         TensoLight.load(ckpt)
     else:
         TensoLight = eval(args.model_name)(aabb, 
@@ -169,6 +169,7 @@ def reconstruction(args):
                                         normals_kind = args.normals_kind,
                                         light_kind=args.light_kind,
                                         dataset=train_dataset,
+                                        expname=args.expname,
                                         )
 
 
@@ -311,6 +312,11 @@ def reconstruction(args):
                 total_loss += loss_normals_diff
                 summary_writer.add_scalar('train/normals_diff_loss', loss_normals_diff.detach().item(), iteration)
 
+            if args.normals_orientation_weight > 0:
+                loss_normals_orientation = normal_weight_factor * args.normals_orientation_weight * ret_kw['normals_orientation_loss_map'].mean()
+                total_loss += loss_normals_orientation
+                summary_writer.add_scalar('train/normals_orientation_loss', loss_normals_orientation.detach().item(), iteration)
+            
             if args.roughness_smoothness_loss_weight > 0: 
                 roughness_smoothness_loss = BRDF_weight_factor * args.roughness_smoothness_loss_weight * ret_kw['roughness_smoothness_loss']
                 total_loss += roughness_smoothness_loss
@@ -428,8 +434,8 @@ def reconstruction(args):
                 light_idx_filtered = all_light_idx[filter_mask, :]      # [filtered(N*H*W), 1]
                 trainingSampler = SimpleSampler(rays_filtered.shape[0], args.batch_size_light)
                 
-                new_AABB = TensoLight.updateAlphaMask_light(tuple(light_grid))
-                TensoLight.shrink_light(new_AABB)
+                # new_AABB = TensoLight.updateAlphaMask_light(tuple(light_grid))
+                # TensoLight.shrink_light(new_AABB)
                 TensoLight.freeze_tensolight()
                 if args.lr_upsample_reset:
                     print("reset lr to initial")
@@ -439,8 +445,8 @@ def reconstruction(args):
                 
                 grad_vars = TensoLight.get_optparam_groups(args.lr_init * lr_scale, args.lr_basis * lr_scale)
                 optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
-    
-
+                
+        
         if iteration in upsamp_list:
             n_voxels = N_voxel_list.pop(0)
             reso_cur = N_to_reso(n_voxels, TensoLight.aabb)

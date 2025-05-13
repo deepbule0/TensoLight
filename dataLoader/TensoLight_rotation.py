@@ -61,7 +61,7 @@ class TensoLight_Dataset_rotated_lights(Dataset):
         self.white_bg = True
         self.downsample = downsample
         self.transform = self.define_transforms()
-        self.near_far = [0.05, 100]  
+        self.near_far = [0.05,  10]  
         self.scene_scale = 1.
         self.scene_bbox = torch.tensor([[-self.scene_scale, -self.scene_scale, -self.scene_scale], [self.scene_scale, self.scene_scale, self.scene_scale]]) * self.downsample
         self.center = torch.mean(self.scene_bbox, axis=0).float().view(1, 1, 3)
