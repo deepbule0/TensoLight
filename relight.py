@@ -134,18 +134,19 @@ def relight(dataset, args):
                 cosine_masked_surf2l = surf2l[cosine_mask] # [num_of_vis_to_get, 3]
                 indirect_light = torch.zeros((*cosine_mask.shape, 3), device=device)   # [bs, envW * envH, 3]
                 masked_light_idx_ = masked_light_idx_chunk.reshape(-1, 1, 1).expand((*cosine_mask.shape, 1))
-                visibility[cosine_mask], \
-                    indirect_light[cosine_mask] = compute_secondary_shading_effects(
-                                                                    TensoLight=TensoLight,
-                                                                    surface_pts=cosine_masked_surface_pts,
-                                                                    surf2light=cosine_masked_surf2l,
-                                                                    light_idx=masked_light_idx_[cosine_mask],
-                                                                    nSample=args.second_nSample,
-                                                                    vis_near=args.second_near,
-                                                                    vis_far=args.second_far,
-                                                                    chunk_size=65536,
-                                                                    device=device,
-                                                                )
+                with torch.no_grad():
+                    visibility[cosine_mask], \
+                        indirect_light[cosine_mask] = compute_secondary_shading_effects(
+                                                                        TensoLight=TensoLight,
+                                                                        surface_pts=cosine_masked_surface_pts,
+                                                                        surf2light=cosine_masked_surf2l,
+                                                                        light_idx=masked_light_idx_[cosine_mask],
+                                                                        nSample=args.second_nSample,
+                                                                        vis_near=args.second_near,
+                                                                        vis_far=args.second_far,
+                                                                        chunk_size=65536,
+                                                                        device=device,
+                                                                    )
 
                 ## Get BRDF specs
                 nlights = surf2l.shape[1]
