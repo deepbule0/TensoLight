@@ -521,7 +521,7 @@ class TensorBase(torch.nn.Module):
 
         rate_a = (self.AABB[1] - rays_o) / vec
         rate_b = (self.AABB[0] - rays_o) / vec
-        t_min = torch.minimum(rate_a, rate_b).amax(-1).clamp(min=near, max=far)
+        t_min = torch.minimum(rate_a, rate_b).amax(-1).clamp(min=near)
 
         rng = torch.arange(N_samples)[None].float()
         if is_train:
